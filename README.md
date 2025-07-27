@@ -118,6 +118,12 @@ Sets the default audio track to stereo for selected Plex users. Requires `plexap
 ```bash
 python3 set_stereo.py --library "Movies" --users "Kids,Family"
 ```
+Before running, set your Plex server URL and admin token in the environment:
+
+```bash
+export PLEX_URL="http://your-server:32400"
+export PLEX_TOKEN="your_plex_token"
+```
 
 
 ## Notes
