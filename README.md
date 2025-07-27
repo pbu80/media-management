@@ -112,6 +112,13 @@ Creates a folder for each MKV/MP4 file based on its name (up to the first closin
 ```bash
 bash movie2folder.sh /path/to/folder
 ```
+### `set_stereo.py`
+Sets the default audio track to stereo for selected Plex users. Requires `plexapi` and `mkvtoolnix`.
+
+```bash
+python3 set_stereo.py --library "Movies" --users "Kids,Family"
+```
+
 
 ## Notes
 
