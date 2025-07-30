@@ -25,7 +25,7 @@ find "$1" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
         --edit track:$id \
         --set name="Tamil" \
         --set language=tam \
-        --set languageIETF=ta
+        --set language-ietf=ta
     done
     echo "$(basename "$file")" >> "$processed_file"
   fi
