@@ -15,9 +15,11 @@ touch "$processed_file"
 find "$1" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
   echo "Processing $file..."
 
-  # Retrieve track IDs that use English language settings
+  # Retrieve audio track numbers using English language settings
   eng_tracks=$(mkvmerge -J "$file" 2>/dev/null |
-    jq -r '.tracks[] | select(.properties.language == "eng" or .properties.language_ietf == "en" or .properties.language == "English") | .id')
+    jq -r '.tracks[] |
+      select(.type == "audio" and (.properties.language == "eng" or .properties.language_ietf == "en" or .properties.language == "English")) |
+      (.id + 1)')
 
   if [ -n "$eng_tracks" ]; then
     for id in $eng_tracks; do
