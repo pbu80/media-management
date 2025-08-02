@@ -113,6 +113,13 @@ Creates a folder for each MKV/MP4 file based on its name (up to the first closin
 bash movie2folder.sh /path/to/folder
 ```
 
+### `mkv_lang_switch.sh`
+Updates the language tags for every audio track in MKV files to a specified language.  Supports predefined options such as `--tamil`, `--hindi`, `--english`, `--telugu`, `--malayalam` or a `--custom` name/language/language‑ietf combination.
+
+```bash
+bash mkv_lang_switch.sh /path/to/folder --tamil
+```
+
 ## Notes
 
 Several scripts call helper utilities not present in this repository (e.g. `convert_720p.sh`, `unrar.sh`, `trimvideo.sh`).  Ensure those exist on your system or adjust the scripts accordingly.
