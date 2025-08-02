@@ -61,6 +61,7 @@ touch "$processed_file"
 find "$folder" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
   echo "Processing $file..."
 
+
   # Retrieve all audio track numbers
   audio_tracks=$(mkvmerge -J "$file" 2>/dev/null |
     jq -r '.tracks[] |
@@ -74,6 +75,7 @@ find "$folder" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
         --set name="$track_name" \
         --set language=$lang \
         --set language-ietf=$lang_ietf
+
     done
     echo "$(basename "$file")" >> "$processed_file"
   fi
