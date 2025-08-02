@@ -114,7 +114,9 @@ bash movie2folder.sh /path/to/folder
 ```
 
 ### `mkv_lang_switch.sh`
+
 Updates the language tags for every audio track in MKV files to a specified language and forces all subtitle tracks to English.  Supports predefined options such as `--tamil`, `--hindi`, `--english`, `--telugu`, `--malayalam` or a `--custom` name/language/language‑ietf combination.
+
 
 ```bash
 bash mkv_lang_switch.sh /path/to/folder --tamil

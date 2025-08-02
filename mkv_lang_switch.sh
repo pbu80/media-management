@@ -1,7 +1,9 @@
 #!/bin/bash
 
+
 # This script updates audio track language tags to a specified language and
 # forces all subtitle tracks to English.
+
 # Usage:
 #   mkv_lang_switch.sh /path/to/folder --tamil
 #   mkv_lang_switch.sh /path/to/folder --custom "Name" lang ietf
@@ -62,6 +64,7 @@ touch "$processed_file"
 find "$folder" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
   echo "Processing $file..."
 
+
   tracks_json=$(mkvmerge -J "$file" 2>/dev/null)
 
   # Retrieve all audio track numbers
@@ -74,6 +77,7 @@ find "$folder" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
   subtitle_tracks=$(echo "$tracks_json" |
     jq -r '.tracks[] |
       select(.type == "subtitles") |
+
       (.id + 1)')
 
   if [ -n "$audio_tracks" ]; then
@@ -83,6 +87,7 @@ find "$folder" -type f -name '*.mkv' -print0 | while IFS= read -r -d '' file; do
         --set name="$track_name" \
         --set language=$lang \
         --set language-ietf=$lang_ietf
+
     done
   fi
 
