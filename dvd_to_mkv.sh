@@ -86,8 +86,6 @@ if [[ -f "$OUTPUT_FILE" ]]; then
 fi
 
 echo "Converting $MOVIE_NAME using title set $best_prefix..."
-# Limit streams to audio, video, and subtitles to avoid muxing unsupported DVD data streams
-ffmpeg -hide_banner -loglevel info -f concat -safe 0 -i "$concat_list" \
-  -map 0:v? -map 0:a? -map 0:s? -c copy "$OUTPUT_FILE"
+ffmpeg -hide_banner -loglevel info -f concat -safe 0 -i "$concat_list" -map 0 -c copy "$OUTPUT_FILE"
 
 echo "Created $OUTPUT_FILE"
