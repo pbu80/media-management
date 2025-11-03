@@ -182,7 +182,7 @@ done
 
 echo "Writing output to $output_file"
 
-ffmpeg_cmd=(ffmpeg -hide_banner -loglevel info -fflags +genpts -f concat -safe 0 -i "$temp_list" -map 0:v:0)
+ffmpeg_cmd=(ffmpeg -hide_banner -loglevel info -fflags +genpts+discardcorrupt -f concat -safe 0 -i "$temp_list" -map 0:v:0)
 
 if [[ -n "$audio_channels" ]]; then
   ffmpeg_cmd+=(-map 0:a:0)
@@ -195,12 +195,14 @@ if [[ -n "$frame_rate" ]]; then
 fi
 
 if [[ -n "$audio_channels" ]]; then
-  # Regenerate audio timestamps so concatenated VOB streams keep monotonic DTS
-  ffmpeg_cmd+=(-c:a aac -b:a 192k -ac "$audio_channels" -af aresample=async=1:first_pts=0)
-fi
+  audio_filters=("asetpts=N/SR/TB" "aresample=async=1:min_hard_comp=0.100000")
+  # Resetting the audio PTS before resampling guarantees monotonically increasing timestamps
+  # even when the concatenated VOB inputs contain discontinuities.
+  ffmpeg_cmd+=(-c:a aac -b:a 192k -ac "$audio_channels" -af "$(IFS=','; echo "${audio_filters[*]}")")
 
-if [[ -n "$audio_rate" ]]; then
-  ffmpeg_cmd+=(-ar "$audio_rate")
+  if [[ -n "$audio_rate" ]]; then
+    ffmpeg_cmd+=(-ar "$audio_rate")
+  fi
 fi
 
 ffmpeg_cmd+=("$output_file")
