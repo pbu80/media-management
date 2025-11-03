@@ -195,7 +195,8 @@ if [[ -n "$frame_rate" ]]; then
 fi
 
 if [[ -n "$audio_channels" ]]; then
-  ffmpeg_cmd+=(-c:a aac -b:a 192k -ac "$audio_channels")
+  # Regenerate audio timestamps so concatenated VOB streams keep monotonic DTS
+  ffmpeg_cmd+=(-c:a aac -b:a 192k -ac "$audio_channels" -af aresample=async=1:first_pts=0)
 fi
 
 if [[ -n "$audio_rate" ]]; then
