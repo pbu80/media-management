@@ -133,12 +133,25 @@ height="${video_props[1]:-}"
 frame_rate="${video_props[2]:-}"
 
 detect_audio_props() {
-  local file
+  local file key value
   for file in "${title_files[@]}"; do
-    mapfile -t audio_props < <(ffprobe -v error -select_streams a:0 -show_entries stream=channels,sample_rate -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null) || true
-    if [[ -n "${audio_props[0]:-}" || -n "${audio_props[1]:-}" ]]; then
-      audio_channels="${audio_props[0]:-}"
-      audio_rate="${audio_props[1]:-}"
+    audio_channels=""
+    audio_rate=""
+    while IFS='=' read -r key value; do
+      case "$key" in
+        channels)
+          audio_channels="$value"
+          ;;
+        sample_rate)
+          audio_rate="$value"
+          ;;
+      esac
+      if [[ -n "$audio_channels" && -n "$audio_rate" ]]; then
+        break
+      fi
+    done < <(ffprobe -v error -select_streams a:0 -show_entries stream=channels,sample_rate -of default=noprint_wrappers=1 "$file" 2>/dev/null) || true
+
+    if [[ -n "$audio_channels" || -n "$audio_rate" ]]; then
       return 0
     fi
   done
