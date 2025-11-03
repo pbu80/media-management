@@ -182,13 +182,13 @@ done
 
 echo "Writing output to $output_file"
 
-ffmpeg_cmd=(ffmpeg -hide_banner -loglevel info -f concat -safe 0 -i "$temp_list" -map 0:v:0)
+ffmpeg_cmd=(ffmpeg -hide_banner -loglevel info -fflags +genpts -f concat -safe 0 -i "$temp_list" -map 0:v:0)
 
 if [[ -n "$audio_channels" ]]; then
   ffmpeg_cmd+=(-map 0:a:0)
 fi
 
-ffmpeg_cmd+=(-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p)
+ffmpeg_cmd+=(-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -vsync vfr)
 
 if [[ -n "$frame_rate" ]]; then
   ffmpeg_cmd+=(-r "$frame_rate")
