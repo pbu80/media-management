@@ -182,35 +182,57 @@ done
 
 echo "Writing output to $output_file"
 
-ffmpeg_cmd=(ffmpeg -hide_banner -loglevel info -fflags +genpts+discardcorrupt -f concat -safe 0 -i "$temp_list" -map 0:v:0)
-
-if [[ -n "$audio_channels" ]]; then
-  ffmpeg_cmd+=(-map 0:a:0)
-fi
-
-ffmpeg_cmd+=(-c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -vsync vfr)
+common_cmd=(ffmpeg -hide_banner -loglevel info -fflags +genpts+discardcorrupt -f concat -safe 0 -i "$temp_list" -map 0:v:0 \
+  -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -vsync vfr)
 
 if [[ -n "$frame_rate" ]]; then
-  ffmpeg_cmd+=(-r "$frame_rate")
+  common_cmd+=(-r "$frame_rate")
 fi
 
+audio_cmd=()
 if [[ -n "$audio_channels" ]]; then
   audio_filters=("asetpts=N/SR/TB" "aresample=async=1:min_hard_comp=0.100000")
   # Resetting the audio PTS before resampling guarantees monotonically increasing timestamps
   # even when the concatenated VOB inputs contain discontinuities.
-  ffmpeg_cmd+=(-c:a aac -b:a 192k -ac "$audio_channels" -af "$(IFS=','; echo "${audio_filters[*]}")")
+  audio_cmd=(-map 0:a:0 -c:a aac -b:a 192k -ac "$audio_channels" \
+    -af "$(IFS=','; echo "${audio_filters[*]}")")
 
   if [[ -n "$audio_rate" ]]; then
-    ffmpeg_cmd+=(-ar "$audio_rate")
+    audio_cmd+=(-ar "$audio_rate")
   fi
 fi
 
-ffmpeg_cmd+=("$output_file")
+build_ffmpeg_cmd() {
+  local -n _dest=$1
+  shift
+  _dest=("${common_cmd[@]}" "$@" "$output_file")
+}
 
-printf 'Running: '
-printf '%q ' "${ffmpeg_cmd[@]}"
-printf '\n'
+print_and_run() {
+  local -a cmd=("$@")
+  printf 'Running: '
+  printf '%q ' "${cmd[@]}"
+  printf '\n'
+  "${cmd[@]}"
+}
 
-"${ffmpeg_cmd[@]}"
+ffmpeg_cmd=()
+build_ffmpeg_cmd ffmpeg_cmd "${audio_cmd[@]}"
+
+if ! print_and_run "${ffmpeg_cmd[@]}"; then
+  status=$?
+  rm -f "$output_file"
+  if [[ -n "$audio_channels" ]]; then
+    echo "AAC encoding failed; retrying with original audio copied into the MP4 container." >&2
+    fallback_audio=(-map 0:a:0 -c:a copy)
+    build_ffmpeg_cmd ffmpeg_cmd "${fallback_audio[@]}"
+    if ! print_and_run "${ffmpeg_cmd[@]}"; then
+      fallback_status=$?
+      exit $fallback_status
+    fi
+  else
+    exit $status
+  fi
+fi
 
 echo "Conversion finished successfully."
