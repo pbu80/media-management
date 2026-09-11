@@ -11,7 +11,7 @@ import re
 import ssl
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -139,17 +139,25 @@ class TautulliClient:
             )
         return match
 
-    def history(self, user_id: Any, page_size: int) -> Iterable[dict[str, Any]]:
+    def history(
+        self,
+        user_id: Any,
+        page_size: int,
+        *,
+        after: str | None = None,
+    ) -> Iterable[dict[str, Any]]:
         start = 0
         while True:
-            result = self.call(
-                "get_history",
-                user_id=user_id,
-                grouping=0,
-                include_activity=0,
-                start=start,
-                length=page_size,
-            ) or {}
+            params: dict[str, Any] = {
+                "user_id": user_id,
+                "grouping": 0,
+                "include_activity": 0,
+                "start": start,
+                "length": page_size,
+            }
+            if after:
+                params["after"] = after
+            result = self.call("get_history", **params) or {}
             rows = result.get("data", []) if isinstance(result, dict) else []
             if not rows:
                 break
@@ -234,10 +242,14 @@ def extract_ids(*sources: dict[str, Any]) -> dict[str, str]:
 
 
 def watched_at(row: dict[str, Any]) -> str:
-    timestamp = _to_float(row.get("stopped") or row.get("started"))
+    timestamp = history_timestamp(row)
     if timestamp is None:
         return ""
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def history_timestamp(row: dict[str, Any]) -> float | None:
+    return _to_float(row.get("stopped") or row.get("started"))
 
 
 def build_csv_row(
@@ -302,6 +314,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--user", default=DEFAULT_USER, help=f"Plex user (default: {DEFAULT_USER}).")
     parser.add_argument("--output", type=Path, help="Output CSV path.")
+    parser.add_argument(
+        "weeks_ago",
+        nargs="?",
+        type=int,
+        help="Optional shorthand: -2 exports only the last 2 weeks.",
+    )
+    parser.add_argument(
+        "--weeks",
+        type=int,
+        help="Export only the last N weeks; both --weeks 2 and --weeks -2 are accepted.",
+    )
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument(
         "--minimum-progress",
@@ -342,19 +365,31 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    if args.weeks is not None and args.weeks_ago is not None:
+        print("error: use either the -N shorthand or --weeks, not both", file=sys.stderr)
+        return 2
+
+    requested_weeks = args.weeks if args.weeks is not None else args.weeks_ago
+    weeks = abs(requested_weeks) if requested_weeks is not None else None
     if (
         args.page_size < 1
         or not 0 <= args.minimum_progress <= 100
         or args.metadata_failure_limit < 0
+        or weeks == 0
     ):
         print(
             "error: page size must be positive, progress must be between 0 and 100, "
-            "and metadata failure limit cannot be negative",
+            "metadata failure limit cannot be negative, and weeks cannot be zero",
             file=sys.stderr,
         )
         return 2
 
-    output = args.output or Path(f"tautulli_{args.user}_trakt.csv")
+    default_name = (
+        f"tautulli_{args.user}_trakt_last_{weeks}_weeks.csv"
+        if weeks is not None
+        else f"tautulli_{args.user}_trakt.csv"
+    )
+    output = args.output or Path(default_name)
     client = TautulliClient(
         args.tautulli_url,
         args.api_key,
@@ -369,16 +404,32 @@ def main() -> int:
         if user_id in (None, ""):
             raise TautulliError(f"Tautulli returned no user_id for {args.user!r}")
 
-        history_rows = list(client.history(user_id, args.page_size))
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(weeks=weeks)
+            if weeks is not None
+            else None
+        )
+        history_rows = list(
+            client.history(
+                user_id,
+                args.page_size,
+                after=cutoff.date().isoformat() if cutoff else None,
+            )
+        )
         metadata_cache: dict[str, dict[str, Any]] = {}
         exported: list[dict[str, str]] = []
         skipped_incomplete = skipped_unsupported = skipped_unmatched = 0
+        skipped_outside_range = 0
         metadata_failures = 0
         consecutive_metadata_failures = 0
         metadata_disabled = args.no_metadata
         metadata_failure_examples: list[str] = []
 
         for position, history in enumerate(history_rows, start=1):
+            timestamp = history_timestamp(history)
+            if cutoff is not None and (timestamp is None or timestamp < cutoff.timestamp()):
+                skipped_outside_range += 1
+                continue
             media_type = str(history.get("media_type", "")).lower()
             if media_type not in {"movie", "episode"}:
                 skipped_unsupported += 1
@@ -429,10 +480,16 @@ def main() -> int:
             writer.writerows(exported)
 
         print(f"User: {user.get('username')} (Tautulli user_id {user_id})")
+        if cutoff is not None:
+            print(
+                f"Date range: {cutoff.isoformat().replace('+00:00', 'Z')} to now "
+                f"(last {weeks} weeks)"
+            )
         print(f"History records read: {len(history_rows)}")
         print(f"Trakt rows exported: {len(exported)}")
         print(f"Skipped incomplete: {skipped_incomplete}")
         print(f"Skipped unsupported media: {skipped_unsupported}")
+        print(f"Skipped outside requested range: {skipped_outside_range}")
         print(f"Skipped without timestamp/Trakt identity: {skipped_unmatched}")
         print(f"Metadata lookup failures: {metadata_failures}")
         if metadata_failure_examples:
