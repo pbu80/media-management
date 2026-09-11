@@ -91,7 +91,25 @@ class TautulliClient:
                     message = api_response.get("message") or "unknown API error"
                     raise TautulliError(f"Tautulli {command!r} failed: {message}")
                 return api_response.get("data")
-            except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            except HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="replace").strip()
+                    error_payload = json.loads(detail)
+                    api_response = error_payload.get("response", {})
+                    detail = api_response.get("message") or detail
+                except (AttributeError, json.JSONDecodeError):
+                    pass
+                detail = detail[:300] if detail else str(exc.reason)
+                error = TautulliError(
+                    f"Tautulli {command!r} returned HTTP {exc.code}: {detail}"
+                )
+                if 400 <= exc.code < 500 and exc.code != 429:
+                    raise error from exc
+                last_error = error
+                if attempt < self.retries:
+                    time.sleep(2 ** (attempt - 1))
+            except (URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt < self.retries:
                     time.sleep(2 ** (attempt - 1))
@@ -263,6 +281,8 @@ def build_csv_row(
 
 def has_trakt_identity(row: dict[str, str]) -> bool:
     has_id = any(row[field] for field in ("trakt_id", "imdb_id", "tmdb_id", "tvdb_id"))
+    if row["type"] == "episode":
+        return has_id
     return has_id or bool(row["title"] and row["year"])
 
 
@@ -292,6 +312,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="Do not query metadata IDs. Fast, but episodes without IDs are skipped.",
+    )
+    parser.add_argument(
+        "--metadata-failure-limit",
+        type=int,
+        default=10,
+        help=(
+            "Stop metadata lookups after this many consecutive failures "
+            "(default: 10; use 0 for unlimited)."
+        ),
+    )
+    parser.add_argument(
         "--insecure",
         action="store_true",
         help="Disable TLS certificate validation (use only for a trusted local server).",
@@ -308,8 +342,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if args.page_size < 1 or not 0 <= args.minimum_progress <= 100:
-        print("error: page size must be positive and progress must be between 0 and 100", file=sys.stderr)
+    if (
+        args.page_size < 1
+        or not 0 <= args.minimum_progress <= 100
+        or args.metadata_failure_limit < 0
+    ):
+        print(
+            "error: page size must be positive, progress must be between 0 and 100, "
+            "and metadata failure limit cannot be negative",
+            file=sys.stderr,
+        )
         return 2
 
     output = args.output or Path(f"tautulli_{args.user}_trakt.csv")
@@ -331,8 +373,12 @@ def main() -> int:
         metadata_cache: dict[str, dict[str, Any]] = {}
         exported: list[dict[str, str]] = []
         skipped_incomplete = skipped_unsupported = skipped_unmatched = 0
+        metadata_failures = 0
+        consecutive_metadata_failures = 0
+        metadata_disabled = args.no_metadata
+        metadata_failure_examples: list[str] = []
 
-        for history in history_rows:
+        for position, history in enumerate(history_rows, start=1):
             media_type = str(history.get("media_type", "")).lower()
             if media_type not in {"movie", "episode"}:
                 skipped_unsupported += 1
@@ -344,20 +390,36 @@ def main() -> int:
             rating_key = str(history.get("rating_key") or "")
             ids = extract_ids(history)
             metadata: dict[str, Any] = {}
-            if not any(ids.values()) and rating_key:
+            if not any(ids.values()) and rating_key and not metadata_disabled:
                 if rating_key not in metadata_cache:
                     try:
                         metadata_cache[rating_key] = client.metadata(rating_key)
+                        consecutive_metadata_failures = 0
                     except TautulliError as exc:
-                        print(f"warning: metadata {rating_key}: {exc}", file=sys.stderr)
+                        metadata_failures += 1
+                        consecutive_metadata_failures += 1
+                        if len(metadata_failure_examples) < 3:
+                            metadata_failure_examples.append(f"{rating_key}: {exc}")
                         metadata_cache[rating_key] = {}
+                        if (
+                            args.metadata_failure_limit
+                            and consecutive_metadata_failures
+                            >= args.metadata_failure_limit
+                        ):
+                            metadata_disabled = True
                 metadata = metadata_cache[rating_key]
 
             row = build_csv_row(history, metadata)
             if not row["watched_at"] or not has_trakt_identity(row):
                 skipped_unmatched += 1
-                continue
-            exported.append(row)
+            else:
+                exported.append(row)
+
+            if position % 100 == 0:
+                print(
+                    f"Processed {position}/{len(history_rows)} history records...",
+                    file=sys.stderr,
+                )
 
         exported.sort(key=lambda item: item["watched_at"])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +433,18 @@ def main() -> int:
         print(f"Trakt rows exported: {len(exported)}")
         print(f"Skipped incomplete: {skipped_incomplete}")
         print(f"Skipped unsupported media: {skipped_unsupported}")
-        print(f"Skipped without timestamp/identity: {skipped_unmatched}")
+        print(f"Skipped without timestamp/Trakt identity: {skipped_unmatched}")
+        print(f"Metadata lookup failures: {metadata_failures}")
+        if metadata_failure_examples:
+            print("First metadata errors:", file=sys.stderr)
+            for example in metadata_failure_examples:
+                print(f"  {example}", file=sys.stderr)
+        if metadata_disabled and not args.no_metadata:
+            print(
+                "Metadata lookups were disabled after repeated failures; movies can "
+                "still match by title/year, but episodes without IDs were skipped.",
+                file=sys.stderr,
+            )
         print(f"Output: {output.resolve()}")
         return 0
     except (TautulliError, OSError) as exc:
